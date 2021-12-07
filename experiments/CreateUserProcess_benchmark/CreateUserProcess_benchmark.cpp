@@ -8,7 +8,7 @@
 #include <stdio.h>
 #include <tchar.h>
 #include <vector>
-
+#include <thread>
 #include <forklib.h>
 
 #define DEBUG_LOG_FILE "C:\\sslab\\temp.log"
@@ -40,11 +40,11 @@ LARGE_INTEGER time()
 void* lol;
 int forkCount = 0;
 
-int child()
+int child(int i, uint32_t* lol)
 {
-	//Sleep(1000 * 20);
-	//getc(stdin);
-	printf("Hello!!!\n");
+	printf("Hello!!! %d, %d\n", i, *lol);
+	getc(stdin);
+	
 	check_fwrite(pid, forkCount);
 
 	Sleep(5); // Simulate some work
@@ -62,15 +62,16 @@ int child()
 	return 0;
 }
 
-#define NUM_ITER 80
+#define NUM_ITER 2
 
 int CALLBACK WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow)
 {
 	system(remove_cmd);
 
 	// just initialize some data to make it more work to fork.
-	void* lol = HeapAlloc(GetProcessHeap(), 0, 12345);
-	memset(lol, 0x90, 12345);
+	const int N = 1024 * 1024 * 10;
+	uint32_t* lol = (uint32_t*)HeapAlloc(GetProcessHeap(), 0, N);
+	memset(lol, 0x90, N);
 
 	// don't display error dialog on crash.
 	//SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
@@ -102,8 +103,22 @@ int CALLBACK WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
 	std::vector<HANDLE> waitHandles;
 	waitHandles.push_back(overlapped.hEvent);
 
+	int i = 123;
 	// forkserver
 	LARGE_INTEGER start = time();
+	
+	std::thread t([] {
+		Sleep(1000);
+		printf("thread id=%d", std::this_thread::get_id());
+	});
+	SECURITY_ATTRIBUTES sa;
+	sa.nLength = sizeof(sa);
+	sa.lpSecurityDescriptor = NULL;
+	sa.bInheritHandle = true;
+	HANDLE hFile = CreateFileMapping(INVALID_HANDLE_VALUE, &sa, PAGE_READWRITE | SEC_COMMIT, 0, 1024 * 1024, NULL);
+	uint32_t* xx = (uint32_t*)MapViewOfFile(hFile, FILE_MAP_ALL_ACCESS, 0, 0, 0);
+	printf("error=%d", GetLastError());
+	FILE* fpSrc = fopen("g:\\xxx.txt", "w");
 	do
 	{
 		// careful waitHandles.size() must never exceed MAXIMUM_WAIT_OBJECTS !!!
@@ -184,10 +199,15 @@ int CALLBACK WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
 				numChildren++;
 				waitHandles.push_back(pi.hProcess);
 				printf("%d\n", forkCount);
+				*lol = 245044518;
+				*xx = 1233456;
+				fprintf(fpSrc, "this is father\n");
 			}
 			else //child (pid==0)
 			{
-				return child();
+				fprintf(fpSrc, "this is child %d\n", *xx);
+				fclose(fpSrc);
+				return child(i, lol);
 			}
 		}
 	} while (forkCount < NUM_ITER || numChildren);
@@ -199,5 +219,8 @@ int CALLBACK WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
 	printf("Took %f seconds\n", elapsed);
 	printf("approxi. %f exec/sec , %f ms/exec\n", NUM_ITER / elapsed, elapsed * 1000 / NUM_ITER);
 	getc(stdin);
+	UnmapViewOfFile(xx);
+	CloseHandle(hFile);
+	t.join();
 	return 0;
 }
